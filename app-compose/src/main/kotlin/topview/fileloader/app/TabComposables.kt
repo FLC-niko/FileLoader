@@ -1,270 +1,126 @@
 package topview.fileloader.app
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.TouchApp
-
+import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-
 import androidx.compose.runtime.Composable
-
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 @Composable
-internal fun UploadRecordsTab(store: ComposeMonitorStore) {
-    if (store.uploadRecords.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("暂无上传记录")
-        }
-        return
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        val colors = MaterialTheme.colorScheme
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-        ) {
-            Text("时间", modifier = Modifier.weight(0.28f), color = colors.onSurfaceVariant)
-            Text("文件名", modifier = Modifier.weight(0.30f), color = colors.onSurfaceVariant)
-            Text("批次ID", modifier = Modifier.weight(0.25f), color = colors.onSurfaceVariant)
-            Text("状态", modifier = Modifier.weight(0.17f), color = colors.onSurfaceVariant)
-        }
-        HorizontalDivider(color = colors.outline.copy(alpha = 0.2f))
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(store.uploadRecords) { row ->
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = colors.surface,
-                    border = BorderStroke(1.dp, colors.outline.copy(alpha = 0.2f)),
-                    tonalElevation = 1.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-                        Text(row.time, modifier = Modifier.weight(0.28f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(row.fileName, modifier = Modifier.weight(0.30f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(row.batchId, modifier = Modifier.weight(0.25f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(row.status, modifier = Modifier.weight(0.17f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
+internal fun SourceListCard(sources: List<MonitoredSource>, onAction: (AppAction) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = colors.surface.copy(alpha = 0.96f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+            Text(
+                "自动上传文件夹",
+                modifier = Modifier.padding(horizontal = 16.dp),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                "新增文件会自动上传",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                color = colors.onSurfaceVariant
+            )
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().height((sources.size.coerceAtMost(6) * 78 + 16).dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(10.dp)
+            ) {
+                items(sources, key = { it.path }) { source -> SourceRow(source, onAction) }
             }
         }
     }
 }
 
 @Composable
-internal fun BatchStatusTab(store: ComposeMonitorStore) {
+private fun SourceRow(source: MonitoredSource, onAction: (AppAction) -> Unit) {
     val colors = MaterialTheme.colorScheme
-
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = colors.secondaryContainer.copy(alpha = 0.38f),
+        border = BorderStroke(1.dp, colors.secondary.copy(alpha = 0.2f))
+    ) {
         Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(
-                onClick = { store.refreshAllBatchStatuses() },
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = "刷新", modifier = Modifier.height(18.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("刷新状态")
+            Icon(Icons.Default.Folder, contentDescription = null, tint = colors.secondary)
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(source.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("自动上传中", color = colors.secondary, style = MaterialTheme.typography.labelLarge)
+                Text(source.path, maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.onSurfaceVariant)
             }
-
             Box {
-                OutlinedButton(
-                    onClick = { store.showRefreshMenu.value = true },
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.height(18.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(store.autoRefreshLabel.value, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.height(18.dp))
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "文件夹操作")
                 }
-                DropdownMenu(
-                    expanded = store.showRefreshMenu.value,
-                    onDismissRequest = { store.showRefreshMenu.value = false }
-                ) {
-                    val refreshOptions = listOf(
-                        "手动刷新" to Icons.Default.TouchApp,
-                        "每10秒" to Icons.Default.Schedule,
-                        "每30秒" to Icons.Default.Schedule,
-                        "每1分钟" to Icons.Default.Schedule,
-                        "每5分钟" to Icons.Default.Schedule
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("打开文件夹") },
+                        leadingIcon = { Icon(Icons.Default.FolderOpen, null) },
+                        onClick = {
+                            menuOpen = false
+                            onAction(AppAction.OpenSource(source.path))
+                        }
                     )
-                    refreshOptions.forEach { (label, icon) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.height(18.dp)) },
-                            trailingIcon = {
-                                if (store.autoRefreshLabel.value == label) {
-                                    Icon(Icons.Default.Check, contentDescription = "已选择", modifier = Modifier.height(18.dp))
-                                }
-                            },
-                            onClick = {
-                                store.setAutoRefresh(label)
-                                store.showRefreshMenu.value = false
-                            }
-                        )
-                    }
-                }
-            }
-
-            Box {
-                OutlinedButton(
-                    onClick = { store.showSortMenu.value = true },
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, modifier = Modifier.height(18.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (store.sortOrder.value == "newest") "最新在上" else "最早在上", fontSize = 13.sp)
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.height(18.dp))
-                }
-                DropdownMenu(
-                    expanded = store.showSortMenu.value,
-                    onDismissRequest = { store.showSortMenu.value = false }
-                ) {
-                    val sortOptions = listOf("最新在上" to "newest", "最早在上" to "oldest")
-                    sortOptions.forEach { (label, value) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, modifier = Modifier.height(18.dp)) },
-                            trailingIcon = {
-                                if (store.sortOrder.value == value) {
-                                    Icon(Icons.Default.Check, contentDescription = "已选择", modifier = Modifier.height(18.dp))
-                                }
-                            },
-                            onClick = {
-                                store.sortOrder.value = value
-                                store.showSortMenu.value = false
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        if (store.batchStatuses.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无批次记录")
-            }
-            return
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp)
-        ) {
-            Text("上传时间", modifier = Modifier.weight(0.22f), color = colors.onSurfaceVariant)
-            Text("批次ID", modifier = Modifier.weight(0.26f), color = colors.onSurfaceVariant)
-            Text("状态", modifier = Modifier.weight(0.35f), color = colors.onSurfaceVariant)
-            Text("下载报告", modifier = Modifier.weight(0.17f), color = colors.onSurfaceVariant)
-            Text("下载异常", modifier = Modifier.weight(0.17f), color = colors.onSurfaceVariant)
-        }
-        HorizontalDivider(color = colors.outline.copy(alpha = 0.2f))
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val sorted = if (store.sortOrder.value == "newest") {
-                store.batchStatuses.sortedByDescending { it.createdAt }
-            } else {
-                store.batchStatuses.sortedBy { it.createdAt }
-            }
-            items(sorted) { row ->
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (row.downloadable) colors.secondaryContainer.copy(alpha = 0.45f) else colors.surface,
-                    border = BorderStroke(1.dp, colors.outline.copy(alpha = 0.2f)),
-                    tonalElevation = 1.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(row.createdAt, modifier = Modifier.weight(0.22f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
-                        Text(row.batchId, modifier = Modifier.weight(0.26f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(row.status, modifier = Modifier.weight(0.35f), maxLines = 2, overflow = TextOverflow.Ellipsis)
-
-                        Box(modifier = Modifier.weight(0.17f), contentAlignment = Alignment.CenterStart) {
-                            Button(
-                                onClick = { store.downloadBatchResult(row.batchId) },
-                                enabled = row.downloadable,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Text("下载")
-                            }
+                    DropdownMenuItem(
+                        text = { Text("停止自动上传") },
+                        leadingIcon = { Icon(Icons.Default.StopCircle, null) },
+                        onClick = {
+                            menuOpen = false
+                            onAction(AppAction.RequestStopSource(source))
                         }
-
-                        Box(modifier = Modifier.weight(0.17f), contentAlignment = Alignment.CenterStart) {
-                            OutlinedButton(
-                                onClick = { store.downloadBatchWrong(row.batchId) },
-                                enabled = row.downloadable,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Text("下载")
-                            }
-                        }
-                    }
+                    )
                 }
             }
         }
@@ -272,35 +128,151 @@ internal fun BatchStatusTab(store: ComposeMonitorStore) {
 }
 
 @Composable
-internal fun LogTab(store: ComposeMonitorStore) {
+internal fun UploadTaskCard(
+    task: UploadTask,
+    expanded: Boolean,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onAction: (AppAction) -> Unit
+) {
     val colors = MaterialTheme.colorScheme
+    var menuOpen by remember { mutableStateOf(false) }
+    val accent = when (task.stage) {
+        TaskStage.READY -> colors.secondary
+        TaskStage.NEEDS_ATTENTION -> colors.error
+        TaskStage.PREPARING, TaskStage.UPLOADING, TaskStage.PROCESSING -> colors.primary
+    }
+    val container = when (task.stage) {
+        TaskStage.NEEDS_ATTENTION -> colors.errorContainer.copy(alpha = 0.28f)
+        TaskStage.READY -> colors.secondaryContainer.copy(alpha = 0.3f)
+        else -> colors.surface
+    }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(12.dp)
-            .background(Color.Transparent)
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable {
+            onAction(
+                if (selectionMode) AppAction.ToggleTaskSelection(task.batchId)
+                else AppAction.ToggleTaskDetails(task.batchId)
+            )
+        },
+        shape = RoundedCornerShape(16.dp),
+        color = if (selectionMode && selected) colors.primaryContainer.copy(alpha = 0.55f) else container,
+        border = BorderStroke(
+            if (selectionMode && selected) 2.dp else 1.dp,
+            if (selectionMode && selected) colors.primary else accent.copy(alpha = 0.25f)
+        ),
+        tonalElevation = 1.dp
     ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = colors.surface,
-            border = BorderStroke(1.dp, colors.outline.copy(alpha = 0.2f))
-        ) {
-            if (store.logs.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("暂无日志", color = colors.onSurfaceVariant)
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (selectionMode) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = { onAction(AppAction.ToggleTaskSelection(task.batchId)) }
+                    )
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(store.logs) { line ->
-                        Text(line, fontFamily = FontFamily.Monospace, color = colors.onSurface)
+                Icon(stageIcon(task.stage), contentDescription = null, tint = accent)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(task.sourceLabel.ifBlank { "上传任务" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stageText(task), color = accent, style = MaterialTheme.typography.labelLarge)
+                }
+                if (!selectionMode) {
+                    when (task.stage) {
+                        TaskStage.NEEDS_ATTENTION -> Button(
+                            onClick = { onAction(AppAction.RetryTask(task.batchId)) },
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("重试失败文件") }
+                        TaskStage.READY -> Button(
+                            onClick = { onAction(AppAction.DownloadResult(task.batchId)) },
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("下载结果") }
+                        else -> Unit
                     }
+                    if (task.stage == TaskStage.READY) {
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "更多任务操作")
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("下载异常文件") },
+                                    onClick = {
+                                        menuOpen = false
+                                        onAction(AppAction.DownloadWrongFiles(task.batchId))
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Icon(
+                        if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (expanded) "收起详情" else "展开详情",
+                        tint = colors.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (task.stage == TaskStage.PREPARING || task.stage == TaskStage.UPLOADING || task.stage == TaskStage.PROCESSING) {
+                Spacer(Modifier.height(10.dp))
+                val progress = task.progress
+                if (progress == null) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                }
+            }
+
+            Spacer(Modifier.height(7.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(task.createdAt, color = colors.onSurfaceVariant)
+                when (task.stage) {
+                    TaskStage.PROCESSING -> if (task.serverTotalFiles > 0 && task.processedFiles >= 0) {
+                        Text("${task.processedFiles}/${task.serverTotalFiles} 已处理", color = colors.onSurfaceVariant)
+                    } else {
+                        Text("等待服务器返回处理进度", color = colors.onSurfaceVariant)
+                    }
+                    TaskStage.PREPARING, TaskStage.UPLOADING, TaskStage.NEEDS_ATTENTION -> {
+                        if (task.totalFiles > 0) {
+                            Text("${task.completedFiles}/${task.totalFiles} 已上传", color = colors.onSurfaceVariant)
+                        }
+                    }
+                    TaskStage.READY -> if (task.totalFiles > 0) {
+                        Text("${task.totalFiles} 个文件处理完成", color = colors.onSurfaceVariant)
+                    }
+                }
+                if (task.failedFiles > 0) Text("${task.failedFiles} 失败", color = colors.error)
+            }
+
+            if (expanded && !selectionMode) {
+                Spacer(Modifier.height(10.dp))
+                Text("技术详情", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+                Text("任务编号：${task.batchId}", color = colors.onSurfaceVariant)
+                if (task.sourcePath.isNotBlank()) {
+                    Text("来源：${task.sourcePath}", maxLines = 2, overflow = TextOverflow.Ellipsis, color = colors.onSurfaceVariant)
+                }
+                if (task.message.isNotBlank()) Text(task.message, color = colors.onSurfaceVariant)
+                task.files.filter { it.stage == FileStage.FAILED }.forEach { file ->
+                    Text("${file.name}：${file.message}", color = colors.error)
                 }
             }
         }
     }
+}
+
+private fun stageIcon(stage: TaskStage) = when (stage) {
+    TaskStage.READY -> Icons.Default.CheckCircle
+    TaskStage.NEEDS_ATTENTION -> Icons.Default.Error
+    TaskStage.PROCESSING -> Icons.Default.Sync
+    TaskStage.UPLOADING -> Icons.Default.CloudUpload
+    TaskStage.PREPARING -> Icons.Default.Schedule
+}
+
+private fun stageText(task: UploadTask): String = when (task.stage) {
+    TaskStage.PREPARING -> "正在准备"
+    TaskStage.UPLOADING -> task.progress?.let { "正在上传 · ${(it * 100).toInt()}%" } ?: "正在上传"
+    TaskStage.PROCESSING -> if (task.serverTotalFiles > 0 && task.processedFiles >= 0) {
+        "服务器处理中 · ${task.processedFiles}/${task.serverTotalFiles}"
+    } else "服务器处理中"
+    TaskStage.NEEDS_ATTENTION -> "需要处理"
+    TaskStage.READY -> "可以下载"
 }

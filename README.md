@@ -1,6 +1,8 @@
 # FileLoader
 
-多文件夹监控自动上传工具（Compose Desktop 版）。
+国基形式审查系统的桌面文件上传助手（Compose Desktop 版）。
+
+普通使用流程只有三步：登录、添加文件夹或 ZIP、等待处理完成后下载结果。选择文件夹后，程序会上传已有的顶层文件，并在本次运行期间继续自动上传新增文件。
 
 ## 项目结构
 
@@ -56,3 +58,6 @@ gradlew.bat :app-compose:packageReleaseExe
 
 - 旧 Swing 界面与 `runSwing` 任务已移除。
 - 入口类为 `topview.fileloader.app.ExeMainKt`，默认启动 Compose。
+- 桌面端使用 `/api/desktop/**` Token API；登录参数和批次上传的 `batchId` 按最新版接口放在 query 中。
+- 默认连接学校正式服务 `https://xssc.gdut.edu.cn`；旧工作室 IP 配置会在启动时自动迁移。
+- “检查连接”通过只读的 `batchRecords` 接口验证服务器与登录状态，不会上传测试文件。

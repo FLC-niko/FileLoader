@@ -64,6 +64,8 @@ public class UploadResponse {
 
         // 文件的下载或预览 URL
         private String url;
+        private String uploadTime;
+        private String batchId;
 
         public UploadData() {}
 
@@ -78,13 +80,20 @@ public class UploadResponse {
         public String getUrl() { return url; }
         public void setUrl(String url) { this.url = url; }
 
+        public String getUploadTime() { return uploadTime; }
+        public void setUploadTime(String uploadTime) { this.uploadTime = uploadTime; }
+
+        public String getBatchId() { return batchId; }
+        public void setBatchId(String batchId) { this.batchId = batchId; }
+
         @Override
         public String toString() {
             return "UploadData{" +
                     "fileId='" + fileId + '\'' +
                     ", url='" + url + '\'' +
+                    ", uploadTime='" + uploadTime + '\'' +
+                    ", batchId='" + batchId + '\'' +
                     '}';
         }
     }
 }
-

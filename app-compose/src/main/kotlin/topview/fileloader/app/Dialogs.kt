@@ -1,244 +1,138 @@
 package topview.fileloader.app
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-
 import androidx.compose.runtime.Composable
-
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
 @Composable
 internal fun AnimatedDialog(
-    visible: Boolean,
+    visible: Boolean = true,
     onDismissRequest: () -> Unit,
     content: @Composable () -> Unit
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(200)),
-        exit = fadeOut(tween(180))
-    ) {
+    AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.45f))
-                .clickable { onDismissRequest() },
+            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.46f)).clickable { onDismissRequest() },
             contentAlignment = Alignment.Center
         ) {
-            AnimatedVisibility(
-                visible = visible,
-                enter = fadeIn(tween(180)) + scaleIn(
-                    initialScale = 0.88f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                ),
-                exit = fadeOut(tween(120)) + scaleOut(
-                    targetScale = 0.92f,
-                    animationSpec = tween(120)
-                )
-            ) {
-                content()
+            AnimatedVisibility(visible = visible, enter = scaleIn(), exit = scaleOut()) {
+                Box(modifier = Modifier.clickable { }) { content() }
             }
         }
     }
 }
 
 @Composable
-internal fun LoginStatusDialog(store: ComposeMonitorStore) {
+internal fun LoginDialog(state: AppUiState, onAction: (AppAction) -> Unit) {
     val colors = MaterialTheme.colorScheme
-    Card(
-        modifier = Modifier.width(380.dp),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-    ) {
-        Column(
+    AnimatedDialog(onDismissRequest = { if (!state.isAuthenticating) onAction(AppAction.CloseLogin) }) {
+        Card(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .width(400.dp)
+                .onPreviewKeyEvent { event ->
+                    val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
+                    if (enter && event.type == KeyEventType.KeyDown && !state.isAuthenticating) {
+                        onAction(AppAction.Login)
+                        true
+                    } else false
+                },
+            shape = RoundedCornerShape(26.dp),
+            colors = CardDefaults.cardColors(containerColor = colors.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
-            Text(
-                text = "登录状态",
-                style = MaterialTheme.typography.headlineSmall,
-                color = colors.onSurface
-            )
-
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                if (store.isLoggingOut.value) {
-                    Text("正在退出登录...", color = colors.onSurfaceVariant)
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                } else if (store.isCheckingLogin.value) {
-                    Text("正在检查登录状态...", color = colors.onSurfaceVariant)
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                } else if (store.isLoggedIn.value) {
-                    LoginInfoLine("用户ID", store.loginUserId.value.ifBlank { "-" })
-                    LoginInfoLine("姓名", store.loginUserName.value.ifBlank { "-" })
-                    LoginInfoLine("角色", if (store.loginRole.value == 1) "管理员" else "普通用户")
-                    LoginInfoLine("Session", store.loginSessionId.value.ifBlank { "-" })
-                    LoginInfoLine("登录时间", store.loginTime.value.ifBlank { "-" })
-                } else {
-                    Text(
-                        text = store.loginDialogMessage.value,
-                        color = colors.error,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                    Text(
-                        text = "请先完成认证登录后再开始监控与上传。",
-                        color = colors.onSurfaceVariant
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
-            ) {
-                TextButton(
-                    onClick = { store.closeLoginDialog() },
-                    enabled = !store.isLoggingOut.value
-                ) {
-                    Text("关闭")
-                }
-                if (store.isLoggedIn.value) {
-                    TextButton(
-                        onClick = { store.logout("弹窗退出登录") },
-                        enabled = !store.isLoggingOut.value && !store.isCheckingLogin.value
-                    ) {
-                        Text(if (store.isLoggingOut.value) "退出中..." else "退出登录")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("登录", style = MaterialTheme.typography.headlineSmall)
+                        Text("登录后即可自动上传资料", color = colors.onSurfaceVariant)
                     }
-                } else {
-                    TextButton(
-                        onClick = {
-                            store.closeLoginDialog()
-                            store.openEncryptLoginDialog()
-                        },
-                        enabled = !store.isCheckingLogin.value && !store.isLoggingOut.value
-                    ) {
-                        Text("去登录")
-                    }
+                    IconButton(
+                        onClick = { onAction(AppAction.CloseLogin) },
+                        enabled = !state.isAuthenticating
+                    ) { Icon(Icons.Default.Close, contentDescription = "关闭") }
                 }
-                TextButton(
-                    onClick = { store.checkLoginStatus("弹窗刷新", openDialogOnUnauthorized = true) },
-                    enabled = !store.isCheckingLogin.value && !store.isLoggingOut.value
-                ) {
-                    Text(if (store.isCheckingLogin.value) "检查中..." else "刷新状态")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun EncryptLoginDialog(store: ComposeMonitorStore) {
-    val colors = MaterialTheme.colorScheme
-    Card(
-        modifier = Modifier.width(380.dp),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = colors.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text(
-                text = "用户登录",
-                style = MaterialTheme.typography.headlineSmall,
-                color = colors.onSurface
-            )
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
                 OutlinedTextField(
-                    value = store.encryptLoginUserIdInput.value,
-                    onValueChange = { store.encryptLoginUserIdInput.value = it },
-                    label = { Text("用户ID") },
+                    value = state.loginUserId,
+                    onValueChange = { onAction(AppAction.LoginUserChanged(it)) },
+                    label = { Text("账号") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !store.isEncryptingPassword.value
+                    enabled = !state.isAuthenticating,
+                    modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
-                    value = store.encryptLoginPasswordInput.value,
-                    onValueChange = { store.encryptLoginPasswordInput.value = it },
+                    value = state.loginPassword,
+                    onValueChange = { onAction(AppAction.LoginPasswordChanged(it)) },
                     label = { Text("密码") },
                     singleLine = true,
+                    enabled = !state.isAuthenticating,
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !store.isEncryptingPassword.value
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onAction(AppAction.Login) }),
+                    modifier = Modifier.fillMaxWidth()
                 )
-                if (store.encryptLoginErrorMessage.value.isNotBlank()) {
-                    Text(
-                        text = store.encryptLoginErrorMessage.value,
-                        color = colors.error,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                if (state.loginError.isNotBlank()) {
+                    Text(state.loginError, color = colors.error)
+                    if (state.loginError.contains("连接") || state.loginError.contains("检查")) {
+                        TextButton(onClick = { onAction(AppAction.RunSelfCheck) }) { Text("检查连接") }
+                    }
                 }
-                if (store.isEncryptingPassword.value) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
-            ) {
-                TextButton(
-                    onClick = { store.closeEncryptLoginDialog() },
-                    enabled = !store.isEncryptingPassword.value
+                Spacer(Modifier.height(2.dp))
+                Button(
+                    onClick = { onAction(AppAction.Login) },
+                    enabled = !state.isAuthenticating,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("关闭")
-                }
-                TextButton(
-                    onClick = { store.encryptLogin() },
-                    enabled = !store.isEncryptingPassword.value
-                ) {
-                    Text(if (store.isEncryptingPassword.value) "登录中..." else "登录")
+                    if (state.isAuthenticating) {
+                        CircularProgressIndicator(modifier = Modifier.width(18.dp).height(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (state.isAuthenticating) "正在登录…" else "登录并开始使用")
                 }
             }
         }
@@ -246,13 +140,35 @@ internal fun EncryptLoginDialog(store: ComposeMonitorStore) {
 }
 
 @Composable
-private fun LoginInfoLine(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "$label:",
-            modifier = Modifier.width(72.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(text = value, modifier = Modifier.weight(1f))
-    }
+internal fun StopSourceDialog(source: MonitoredSource, onAction: (AppAction) -> Unit) {
+    AlertDialog(
+        onDismissRequest = { onAction(AppAction.CancelStopSource) },
+        title = { Text("停止自动上传？") },
+        text = {
+            Text("停止后，${source.name} 中新增的文件将不再自动上传；已经进入队列的文件会继续完成。")
+        },
+        dismissButton = {
+            TextButton(onClick = { onAction(AppAction.CancelStopSource) }) { Text("继续监控") }
+        },
+        confirmButton = {
+            Button(onClick = { onAction(AppAction.ConfirmStopSource) }) { Text("停止自动上传") }
+        }
+    )
+}
+
+@Composable
+internal fun DeleteTasksDialog(selectedCount: Int, onAction: (AppAction) -> Unit) {
+    AlertDialog(
+        onDismissRequest = { onAction(AppAction.CancelDeleteSelectedTasks) },
+        title = { Text("删除所选任务？") },
+        text = {
+            Text("将从本机删除 $selectedCount 条任务记录，不会删除服务器上的结果。正在上传的任务会自动保留。")
+        },
+        dismissButton = {
+            TextButton(onClick = { onAction(AppAction.CancelDeleteSelectedTasks) }) { Text("取消") }
+        },
+        confirmButton = {
+            Button(onClick = { onAction(AppAction.ConfirmDeleteSelectedTasks) }) { Text("删除") }
+        }
+    )
 }

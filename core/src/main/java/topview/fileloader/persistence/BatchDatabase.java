@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import topview.fileloader.config.AppPaths;
 
 /**
  * 本地 SQLite 数据库封装类
@@ -27,10 +28,7 @@ import java.util.logging.Logger;
 public class BatchDatabase {
 
     private static final Logger logger = Logger.getLogger(BatchDatabase.class.getName());
-    private static final Path APP_HOME_DIR = Paths.get(System.getProperty("user.home"), ".fileloader");
-    private static final Path DB_FILE = APP_HOME_DIR.resolve("batches.db");
     private static final Path LEGACY_DB_FILE = Paths.get("batches.db");
-    private static final String JDBC_URL = "jdbc:sqlite:" + DB_FILE.toAbsolutePath();
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static volatile boolean dbAvailable = false;
 
@@ -40,12 +38,26 @@ public class BatchDatabase {
         public final String status;
         public final String createdAt;
         public final String updatedAt;
+        public final String sourceLabel;
+        public final String sourcePath;
+        public final String stage;
+        public final int totalFiles;
+        public final int completedFiles;
+        public final int failedFiles;
 
-        BatchRecord(String batchId, String status, String createdAt, String updatedAt) {
+        BatchRecord(String batchId, String status, String createdAt, String updatedAt,
+                String sourceLabel, String sourcePath, String stage,
+                int totalFiles, int completedFiles, int failedFiles) {
             this.batchId = batchId;
             this.status = status;
             this.createdAt = createdAt;
             this.updatedAt = updatedAt;
+            this.sourceLabel = sourceLabel;
+            this.sourcePath = sourcePath;
+            this.stage = stage;
+            this.totalFiles = totalFiles;
+            this.completedFiles = completedFiles;
+            this.failedFiles = failedFiles;
         }
     }
 
@@ -79,7 +91,13 @@ public class BatchDatabase {
                             updated_at TEXT NOT NULL
                         )
                     """);
-            logger.info("BatchDatabase 初始化完成，数据库文件: " + DB_FILE.toAbsolutePath());
+            addColumnIfMissing(conn, "source_label", "TEXT NOT NULL DEFAULT ''");
+            addColumnIfMissing(conn, "source_path", "TEXT NOT NULL DEFAULT ''");
+            addColumnIfMissing(conn, "stage", "TEXT NOT NULL DEFAULT 'PROCESSING'");
+            addColumnIfMissing(conn, "total_files", "INTEGER NOT NULL DEFAULT 0");
+            addColumnIfMissing(conn, "completed_files", "INTEGER NOT NULL DEFAULT 0");
+            addColumnIfMissing(conn, "failed_files", "INTEGER NOT NULL DEFAULT 0");
+            logger.info("BatchDatabase 初始化完成，数据库文件: " + dbFile().toAbsolutePath());
         } catch (SQLException e) {
             dbAvailable = false;
             logger.log(Level.SEVERE, "BatchDatabase 初始化失败", e);
@@ -94,15 +112,29 @@ public class BatchDatabase {
      * @param status  当前状态文本
      */
     public static void upsert(String batchId, String status) {
+        upsertTask(batchId, status, "", "", "PROCESSING", 0, 0, 0);
+    }
+
+    public static void upsertTask(String batchId, String status, String sourceLabel, String sourcePath,
+            String stage, int totalFiles, int completedFiles, int failedFiles) {
         if (!dbAvailable)
             return;
         String now = LocalDateTime.now().format(FMT);
         String sql = """
-                    INSERT INTO batch_records (batch_id, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO batch_records (
+                        batch_id, status, created_at, updated_at,
+                        source_label, source_path, stage, total_files, completed_files, failed_files
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(batch_id) DO UPDATE SET
                         status     = excluded.status,
-                        updated_at = excluded.updated_at
+                        updated_at = excluded.updated_at,
+                        source_label = CASE WHEN excluded.source_label = '' THEN batch_records.source_label ELSE excluded.source_label END,
+                        source_path = CASE WHEN excluded.source_path = '' THEN batch_records.source_path ELSE excluded.source_path END,
+                        stage = excluded.stage,
+                        total_files = excluded.total_files,
+                        completed_files = excluded.completed_files,
+                        failed_files = excluded.failed_files
                 """;
         try (Connection conn = connect();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -110,6 +142,12 @@ public class BatchDatabase {
             ps.setString(2, status);
             ps.setString(3, now);
             ps.setString(4, now);
+            ps.setString(5, sourceLabel == null ? "" : sourceLabel);
+            ps.setString(6, sourcePath == null ? "" : sourcePath);
+            ps.setString(7, stage == null ? "PROCESSING" : stage);
+            ps.setInt(8, Math.max(0, totalFiles));
+            ps.setInt(9, Math.max(0, completedFiles));
+            ps.setInt(10, Math.max(0, failedFiles));
             ps.executeUpdate();
         } catch (SQLException e) {
             logger.log(Level.WARNING, "BatchDatabase upsert 失败 batchId=" + batchId, e);
@@ -148,7 +186,11 @@ public class BatchDatabase {
         List<BatchRecord> list = new ArrayList<>();
         if (!dbAvailable)
             return list;
-        String sql = "SELECT batch_id, status, created_at, updated_at FROM batch_records ORDER BY created_at DESC";
+        String sql = """
+                SELECT batch_id, status, created_at, updated_at,
+                       source_label, source_path, stage, total_files, completed_files, failed_files
+                FROM batch_records ORDER BY created_at DESC
+                """;
         try (Connection conn = connect();
                 Statement stmt = conn.createStatement();
                 ResultSet rs = stmt.executeQuery(sql)) {
@@ -157,7 +199,13 @@ public class BatchDatabase {
                         rs.getString("batch_id"),
                         rs.getString("status"),
                         rs.getString("created_at"),
-                        rs.getString("updated_at")));
+                        rs.getString("updated_at"),
+                        rs.getString("source_label"),
+                        rs.getString("source_path"),
+                        rs.getString("stage"),
+                        rs.getInt("total_files"),
+                        rs.getInt("completed_files"),
+                        rs.getInt("failed_files")));
             }
         } catch (SQLException e) {
             logger.log(Level.WARNING, "BatchDatabase getAll 失败", e);
@@ -165,29 +213,74 @@ public class BatchDatabase {
         return list;
     }
 
+    /** Deletes local task history only; no server-side batch is changed. */
+    public static void deleteByIds(java.util.Collection<String> batchIds) {
+        if (!dbAvailable || batchIds == null || batchIds.isEmpty())
+            return;
+        String sql = "DELETE FROM batch_records WHERE batch_id=?";
+        try (Connection conn = connect(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            conn.setAutoCommit(false);
+            for (String batchId : batchIds) {
+                if (batchId == null || batchId.isBlank())
+                    continue;
+                ps.setString(1, batchId);
+                ps.addBatch();
+            }
+            ps.executeBatch();
+            conn.commit();
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "BatchDatabase delete failed", e);
+        }
+    }
+
     // ---- 内部工具 ----
 
     private static Connection connect() throws SQLException {
-        return DriverManager.getConnection(JDBC_URL);
+        return DriverManager.getConnection("jdbc:sqlite:" + dbFile().toAbsolutePath());
+    }
+
+    private static void addColumnIfMissing(Connection connection, String column, String definition)
+            throws SQLException {
+        boolean found = false;
+        try (Statement statement = connection.createStatement();
+                ResultSet result = statement.executeQuery("PRAGMA table_info(batch_records)")) {
+            while (result.next()) {
+                if (column.equalsIgnoreCase(result.getString("name"))) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("ALTER TABLE batch_records ADD COLUMN " + column + " " + definition);
+            }
+        }
     }
 
     private static void ensureDataDirectory() {
+        Path appHomeDir = AppPaths.homeDirectory();
         try {
-            Files.createDirectories(APP_HOME_DIR);
+            Files.createDirectories(appHomeDir);
         } catch (IOException e) {
-            logger.log(Level.WARNING, "创建数据目录失败: " + APP_HOME_DIR, e);
+            logger.log(Level.WARNING, "创建数据目录失败: " + appHomeDir, e);
         }
     }
 
     private static void migrateLegacyDatabaseIfNeeded() {
-        if (!Files.exists(LEGACY_DB_FILE) || Files.exists(DB_FILE)) {
+        Path dbFile = dbFile();
+        if (!Files.exists(LEGACY_DB_FILE) || Files.exists(dbFile)) {
             return;
         }
         try {
-            Files.copy(LEGACY_DB_FILE, DB_FILE, StandardCopyOption.COPY_ATTRIBUTES);
-            logger.info("已迁移历史数据库到: " + DB_FILE.toAbsolutePath());
+            Files.copy(LEGACY_DB_FILE, dbFile, StandardCopyOption.COPY_ATTRIBUTES);
+            logger.info("已迁移历史数据库到: " + dbFile.toAbsolutePath());
         } catch (IOException e) {
             logger.log(Level.WARNING, "迁移历史数据库失败", e);
         }
+    }
+
+    private static Path dbFile() {
+        return AppPaths.homeDirectory().resolve("batches.db");
     }
 }

@@ -1,59 +1,21 @@
 package topview.fileloader.service;
 
+import com.google.gson.JsonObject;
 import topview.fileloader.config.AppConfig;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
-import java.security.cert.X509Certificate;
+import okhttp3.HttpUrl;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.HttpsURLConnection;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSocketFactory;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
 
 /**
- * 登录状态查询服务（GET /api/auth/login）。
+ * 桌面版 Token 认证服务。
  */
 public class AuthStatusService {
     private static final Logger logger = Logger.getLogger(AuthStatusService.class.getName());
-
-    private static SSLSocketFactory trustAllSslSocketFactory;
-    private static HostnameVerifier trustAllHostnameVerifier;
-
-    static {
-        try {
-            TrustManager[] trustAllCerts = new TrustManager[] {
-                    new X509TrustManager() {
-                        @Override
-                        public X509Certificate[] getAcceptedIssuers() {
-                            return null;
-                        }
-
-                        @Override
-                        public void checkClientTrusted(X509Certificate[] certs, String authType) {
-                        }
-
-                        @Override
-                        public void checkServerTrusted(X509Certificate[] certs, String authType) {
-                        }
-                    }
-            };
-            SSLContext sc = SSLContext.getInstance("SSL");
-            sc.init(null, trustAllCerts, new SecureRandom());
-            trustAllSslSocketFactory = sc.getSocketFactory();
-            trustAllHostnameVerifier = (hostname, session) -> true;
-        } catch (Exception e) {
-            logger.log(Level.SEVERE, "Failed to initialize SSL bypass", e);
-        }
-    }
 
     public enum State {
         LOGGED_IN,
@@ -75,15 +37,15 @@ public class AuthStatusService {
         private final String userId;
         private final String name;
         private final int role;
-        private final String sessionId;
+        private final String token;
         private final String loginTime;
 
-        public LoginUser(boolean loggedIn, String userId, String name, int role, String sessionId, String loginTime) {
+        public LoginUser(boolean loggedIn, String userId, String name, int role, String token, String loginTime) {
             this.loggedIn = loggedIn;
             this.userId = userId;
             this.name = name;
             this.role = role;
-            this.sessionId = sessionId;
+            this.token = token;
             this.loginTime = loginTime;
         }
 
@@ -103,8 +65,8 @@ public class AuthStatusService {
             return role;
         }
 
-        public String getSessionId() {
-            return sessionId;
+        public String getToken() {
+            return token;
         }
 
         public String getLoginTime() {
@@ -178,274 +140,119 @@ public class AuthStatusService {
         }
     }
 
-    /**
-     * 查询当前登录状态。
-     */
     public static LoginStatusResult queryLoginStatus() {
-        String urlStr = AppConfig.appendAuthQueryParams(buildBaseUrl() + "api/auth/login");
-        HttpURLConnection conn = null;
+        if (!AppConfig.hasAuthToken()) {
+            return new LoginStatusResult(State.UNAUTHORIZED, 0, 401, "当前未登录", null);
+        }
+        BatchRecordsService.Result validation = BatchRecordsService.fetch();
+        if (!validation.isAvailable()) {
+            State state = switch (validation.getState()) {
+                case UNAUTHORIZED -> State.UNAUTHORIZED;
+                case NETWORK_ERROR -> State.NETWORK_ERROR;
+                case PARSE_ERROR -> State.PARSE_ERROR;
+                case SERVER_ERROR -> State.SERVER_ERROR;
+                case AVAILABLE -> State.LOGGED_IN;
+            };
+            return new LoginStatusResult(
+                    state,
+                    validation.getHttpCode(),
+                    validation.getBusinessCode(),
+                    validation.getMessage(),
+                    null);
+        }
+        LoginUser user = new LoginUser(
+                true,
+                AppConfig.getAuthUserId(),
+                AppConfig.getAuthName(),
+                AppConfig.getAuthRole(),
+                AppConfig.getAuthToken(),
+                AppConfig.getAuthLoginTime());
+        return new LoginStatusResult(State.LOGGED_IN, validation.getHttpCode(), 200, "登录有效", user);
+    }
+
+    public static LoginStatusResult login(String userId, String password) {
         try {
-            conn = openConnection(urlStr);
-            conn.setRequestMethod("GET");
-            int httpCode = conn.getResponseCode();
+            HttpUrl url = DesktopApiClient.urlBuilder("auth/login")
+                    .addQueryParameter("userId", userId == null ? "" : userId.trim())
+                    .addQueryParameter("password", password == null ? "" : password)
+                    .build();
+            Request request = DesktopApiClient.requestBuilder(url, false)
+                    .post(RequestBody.create(new byte[0], null))
+                    .build();
+            try (Response response = DesktopApiClient.execute(request)) {
+            int httpCode = response.code();
+            String body = DesktopApiClient.readResponseBody(response);
+            JsonObject root = DesktopApiClient.parseObject(body);
+            int bizCode = DesktopApiClient.getInt(root, "code", httpCode);
+            String msg = DesktopApiClient.responseMessage(root, httpCode, "");
 
-            if (httpCode == 401 || httpCode == 403) {
-                String body = readResponseBody(conn, httpCode);
-                String msg = parseStringField(body, "msg");
-                if (msg == null || msg.isBlank()) {
-                    msg = "未登录或认证已过期";
-                }
-                return new LoginStatusResult(State.UNAUTHORIZED, httpCode, -1, msg, null);
+            if (DesktopApiClient.isUnauthorized(httpCode, root)) {
+                return new LoginStatusResult(State.UNAUTHORIZED, httpCode, bizCode, msg, null);
+            }
+            if (httpCode != 200 || bizCode != 200) {
+                return new LoginStatusResult(State.SERVER_ERROR, httpCode, bizCode,
+                        msg.isBlank() ? "登录失败" : msg, null);
             }
 
-            if (httpCode != 200) {
-                String body = readResponseBody(conn, httpCode);
-                String msg = parseStringField(body, "msg");
-                if (msg == null || msg.isBlank()) {
-                    msg = "登录状态查询失败 (HTTP " + httpCode + ")";
-                }
-                return new LoginStatusResult(State.SERVER_ERROR, httpCode, -1, msg, null);
-            }
-
-            String body = readResponseBody(conn, httpCode);
-            int bizCode = parseIntField(body, "code", Integer.MIN_VALUE);
-            String msg = parseStringField(body, "msg");
-            if (msg == null) {
-                msg = "";
-            }
-
-            if (bizCode == 401 || bizCode == 403) {
-                String unauthorizedMsg = msg.isBlank() ? "当前未登录" : msg;
-                return new LoginStatusResult(State.UNAUTHORIZED, httpCode, bizCode, unauthorizedMsg, null);
-            }
-
-            if (containsDataNull(body)) {
-                String unauthorizedMsg = msg.isBlank() ? "当前未登录" : msg;
-                return new LoginStatusResult(State.UNAUTHORIZED, httpCode, bizCode, unauthorizedMsg, null);
-            }
-
-            Boolean loggedIn = parseBooleanFieldNullable(body, "loggedIn");
-            if (loggedIn == null) {
-                return new LoginStatusResult(State.PARSE_ERROR, httpCode, bizCode, "无法解析登录状态字段 loggedIn", null);
-            }
-
-            if (!loggedIn) {
-                String unauthorizedMsg = msg.isBlank() ? "当前未登录" : msg;
-                return new LoginStatusResult(State.UNAUTHORIZED, httpCode, bizCode, unauthorizedMsg, null);
-            }
-
-            if (bizCode != Integer.MIN_VALUE && bizCode != 0 && bizCode != 200) {
-                String serverMsg = msg.isBlank() ? ("服务端返回异常业务码: " + bizCode) : msg;
-                return new LoginStatusResult(State.SERVER_ERROR, httpCode, bizCode, serverMsg, null);
+            JsonObject data = DesktopApiClient.getObject(root, "data");
+            String token = DesktopApiClient.getString(data, "token");
+            if (token.isBlank()) {
+                return new LoginStatusResult(State.PARSE_ERROR, httpCode, bizCode, "响应中缺少 token", null);
             }
 
             LoginUser user = new LoginUser(
-                    true,
-                    defaultString(parseStringField(body, "userId")),
-                    defaultString(parseStringField(body, "name")),
-                    parseIntField(body, "role", 0),
-                    defaultString(parseStringField(body, "sessionId")),
-                    defaultString(parseStringField(body, "loginTime")));
+                    DesktopApiClient.getBoolean(data, "loggedIn", true),
+                    DesktopApiClient.getString(data, "userId"),
+                    DesktopApiClient.getString(data, "name"),
+                    DesktopApiClient.getInt(data, "role", 0),
+                    token,
+                    DesktopApiClient.getString(data, "loginTime"));
 
-            return new LoginStatusResult(State.LOGGED_IN, httpCode, bizCode, msg.isBlank() ? "已登录" : msg, user);
-        } catch (IOException e) {
-            logger.log(Level.WARNING, "Login status request failed", e);
-            return new LoginStatusResult(State.NETWORK_ERROR, -1, -1, "网络异常: " + e.getMessage(), null);
-        } catch (Exception e) {
-            logger.log(Level.WARNING, "Login status parse failed", e);
-            return new LoginStatusResult(State.PARSE_ERROR, -1, -1, "响应解析异常: " + e.getMessage(), null);
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
+            AppConfig.setAuthSession(user.getToken(), user.getUserId(), user.getName(), user.getRole(), user.getLoginTime());
+            return new LoginStatusResult(State.LOGGED_IN, httpCode, bizCode,
+                    msg.isBlank() ? "登录成功" : msg, user);
             }
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "Desktop login request failed", e);
+            return new LoginStatusResult(State.NETWORK_ERROR, -1, -1,
+                    DesktopApiClient.friendlyNetworkMessage(e), null);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Desktop login parse failed", e);
+            return new LoginStatusResult(State.PARSE_ERROR, -1, -1, "响应解析异常: " + e.getMessage(), null);
         }
     }
 
-    /**
-     * 发起退出登录。
-     */
     public static LogoutResult logout() {
-        String urlStr = AppConfig.appendAuthQueryParams(buildBaseUrl() + "api/auth/logout");
-        HttpURLConnection conn = null;
         try {
-            conn = openConnection(urlStr);
-            conn.setRequestMethod("GET");
-            conn.setInstanceFollowRedirects(false);
+            Request request = DesktopApiClient.requestBuilder("auth/logout", true)
+                    .post(RequestBody.create(new byte[0], null))
+                    .build();
+            try (Response response = DesktopApiClient.execute(request)) {
+            int httpCode = response.code();
+            String body = DesktopApiClient.readResponseBody(response);
+            JsonObject root = DesktopApiClient.parseObject(body);
+            String msg = DesktopApiClient.responseMessage(root, httpCode, "");
 
-            int httpCode = conn.getResponseCode();
-            String body = readResponseBody(conn, httpCode);
-            int bizCode = parseIntField(body, "code", Integer.MIN_VALUE);
-            String msg = parseStringField(body, "msg");
-            String location = conn.getHeaderField("Location");
-
-            if (bizCode == 401 || bizCode == 403) {
-                return new LogoutResult(
-                        LogoutState.UNAUTHORIZED,
-                        httpCode,
-                        (msg == null || msg.isBlank()) ? "当前未登录" : msg,
-                        location);
+            if (DesktopApiClient.isUnauthorized(httpCode, root)) {
+                return new LogoutResult(LogoutState.UNAUTHORIZED, httpCode,
+                        msg.isBlank() ? "Token 已失效，本地登录状态已清理" : msg, null);
             }
-
-            if (httpCode == 401 || httpCode == 403) {
-                return new LogoutResult(
-                        LogoutState.UNAUTHORIZED,
-                        httpCode,
-                        (msg == null || msg.isBlank()) ? "当前未登录" : msg,
-                        location);
+            if (httpCode != 200) {
+                return new LogoutResult(LogoutState.SERVER_ERROR, httpCode,
+                        msg.isBlank() ? "退出登录失败 (HTTP " + httpCode + ")" : msg, null);
             }
-
-            if (httpCode == 200 || httpCode == 204 || isRedirectCode(httpCode)) {
-                if (bizCode != Integer.MIN_VALUE && bizCode != 0 && bizCode != 200) {
-                    String serverMessage = (msg == null || msg.isBlank())
-                            ? ("退出登录失败，业务码: " + bizCode)
-                            : msg;
-                    return new LogoutResult(LogoutState.SERVER_ERROR, httpCode, serverMessage, location);
-                }
-
-                String successMessage;
-                if (msg != null && !msg.isBlank()) {
-                    successMessage = msg;
-                } else if (location != null && !location.isBlank()) {
-                    successMessage = "退出请求已发起，跳转: " + location;
-                } else {
-                    successMessage = "退出登录成功";
-                }
-                return new LogoutResult(LogoutState.SUCCESS, httpCode, successMessage, location);
+            return new LogoutResult(LogoutState.SUCCESS, httpCode,
+                    msg.isBlank() ? "退出成功" : msg, null);
             }
-
-            String serverMessage = (msg == null || msg.isBlank()) ? ("退出登录失败 (HTTP " + httpCode + ")") : msg;
-            return new LogoutResult(LogoutState.SERVER_ERROR, httpCode, serverMessage, location);
         } catch (IOException e) {
-            logger.log(Level.WARNING, "Logout request failed", e);
-            return new LogoutResult(LogoutState.NETWORK_ERROR, -1, "网络异常: " + e.getMessage(), null);
+            logger.log(Level.WARNING, "Desktop logout request failed", e);
+            return new LogoutResult(LogoutState.NETWORK_ERROR, -1,
+                    DesktopApiClient.friendlyNetworkMessage(e), null);
         } catch (Exception e) {
-            logger.log(Level.WARNING, "Logout request parse failed", e);
+            logger.log(Level.WARNING, "Desktop logout parse failed", e);
             return new LogoutResult(LogoutState.SERVER_ERROR, -1, "退出登录异常: " + e.getMessage(), null);
         } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
+            AppConfig.clearAuthSession();
         }
-    }
-
-    private static String buildBaseUrl() {
-        String url = AppConfig.getServerUrl();
-        if (!url.endsWith("/")) {
-            url += "/";
-        }
-        return url;
-    }
-
-    private static HttpURLConnection openConnection(String urlStr) throws Exception {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        if (conn instanceof HttpsURLConnection) {
-            HttpsURLConnection https = (HttpsURLConnection) conn;
-            https.setSSLSocketFactory(trustAllSslSocketFactory);
-            https.setHostnameVerifier(trustAllHostnameVerifier);
-        }
-        conn.setConnectTimeout(AppConfig.getConnectTimeout() * 1000);
-        conn.setReadTimeout(AppConfig.getReadTimeout() * 1000);
-        conn.setRequestProperty("Accept", "application/json");
-        conn.setRequestProperty("User-Agent", "FileLoader/1.0");
-        return conn;
-    }
-
-    private static String readResponseBody(HttpURLConnection conn, int httpCode) throws IOException {
-        InputStream stream = (httpCode >= 400) ? conn.getErrorStream() : conn.getInputStream();
-        if (stream == null) {
-            stream = new ByteArrayInputStream(new byte[0]);
-        }
-        byte[] bytes = stream.readAllBytes();
-        return new String(bytes, StandardCharsets.UTF_8).trim();
-    }
-
-    private static int parseIntField(String json, String field, int defaultValue) {
-        int idx = json.indexOf("\"" + field + "\"");
-        if (idx < 0) {
-            return defaultValue;
-        }
-        int colon = json.indexOf(':', idx);
-        if (colon < 0) {
-            return defaultValue;
-        }
-        int start = colon + 1;
-        while (start < json.length() && (json.charAt(start) == ' ' || json.charAt(start) == '\t')) {
-            start++;
-        }
-        int end = start;
-        while (end < json.length() && (Character.isDigit(json.charAt(end)) || json.charAt(end) == '-')) {
-            end++;
-        }
-        if (end <= start) {
-            return defaultValue;
-        }
-        try {
-            return Integer.parseInt(json.substring(start, end));
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private static String parseStringField(String json, String field) {
-        int idx = json.indexOf("\"" + field + "\"");
-        if (idx < 0) {
-            return null;
-        }
-        int colon = json.indexOf(':', idx);
-        if (colon < 0) {
-            return null;
-        }
-        int start = colon + 1;
-        while (start < json.length() && (json.charAt(start) == ' ' || json.charAt(start) == '\t')) {
-            start++;
-        }
-        if (start >= json.length() || json.charAt(start) != '"') {
-            return null;
-        }
-        int end = json.indexOf('"', start + 1);
-        if (end <= start) {
-            return null;
-        }
-        return json.substring(start + 1, end).trim();
-    }
-
-    private static Boolean parseBooleanFieldNullable(String json, String field) {
-        int idx = json.indexOf("\"" + field + "\"");
-        if (idx < 0) {
-            return null;
-        }
-        int colon = json.indexOf(':', idx);
-        if (colon < 0) {
-            return null;
-        }
-        int start = colon + 1;
-        while (start < json.length() && (json.charAt(start) == ' ' || json.charAt(start) == '\t')) {
-            start++;
-        }
-        if (start + 4 <= json.length() && json.substring(start, start + 4).equalsIgnoreCase("true")) {
-            return true;
-        }
-        if (start + 5 <= json.length() && json.substring(start, start + 5).equalsIgnoreCase("false")) {
-            return false;
-        }
-        return null;
-    }
-
-    private static String defaultString(String value) {
-        return value == null ? "" : value;
-    }
-
-    private static boolean containsDataNull(String json) {
-        return json.contains("\"data\":null") || json.contains("\"data\" : null");
-    }
-
-    private static boolean isRedirectCode(int code) {
-        return code == HttpURLConnection.HTTP_MOVED_PERM
-                || code == HttpURLConnection.HTTP_MOVED_TEMP
-                || code == HttpURLConnection.HTTP_SEE_OTHER
-                || code == HttpURLConnection.HTTP_NOT_MODIFIED
-                || code == 307
-                || code == 308;
     }
 }
