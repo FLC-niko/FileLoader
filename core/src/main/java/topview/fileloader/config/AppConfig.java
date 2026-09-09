@@ -348,9 +348,7 @@ public class AppConfig {
         try {
             URI uri = URI.create(configured);
             String host = uri.getHost();
-            if (LEGACY_STUDIO_HOST.equalsIgnoreCase(host)) {
-                return DEFAULT_SERVER_URL;
-            }
+            // Removed legacy studio host forced migration so test environments can be used.
             if (SCHOOL_SERVER_HOST.equalsIgnoreCase(host)
                     && !"https".equalsIgnoreCase(uri.getScheme())) {
                 return DEFAULT_SERVER_URL;
