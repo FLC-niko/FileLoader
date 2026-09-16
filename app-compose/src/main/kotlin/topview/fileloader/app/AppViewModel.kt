@@ -150,6 +150,7 @@ internal class AppViewModel(
             }
             AppAction.CancelDeleteSelectedTasks -> _state.update { it.copy(showDeleteTaskConfirmation = false) }
             AppAction.ConfirmDeleteSelectedTasks -> deleteSelectedTasks()
+            AppAction.ClearAllHistory -> clearAllHistory()
             is AppAction.DownloadResult -> _effects.tryEmit(UiEffect.ChooseDownloadDirectory(action.batchId, false))
             is AppAction.DownloadWrongFiles -> _effects.tryEmit(UiEffect.ChooseDownloadDirectory(action.batchId, true))
             is AppAction.ToggleTaskDetails -> _state.update { current ->
@@ -191,7 +192,7 @@ internal class AppViewModel(
 
     private fun validateInitialSession() {
         if (!AppConfig.hasAuthToken()) {
-            _state.update { it.copy(isStarting = false, showLogin = true) }
+            _state.update { it.copy(isStarting = false, showLogin = true, isUploadPaused = true) }
             return
         }
         _state.update { it.copy(isStarting = true, loginError = "正在确认登录状态") }
@@ -199,16 +200,21 @@ internal class AppViewModel(
             val result = authGateway.validateSession()
             if (result.state == AuthStatusService.State.LOGGED_IN) {
                 markLoggedIn()
-                uploadCoordinator.currentTasks()
-                    .filter { it.stage == TaskStage.PROCESSING }
-                    .forEach { batchTracker.track(it.batchId) }
             } else {
                 val message = when (result.state) {
                     AuthStatusService.State.UNAUTHORIZED -> "登录已过期，请重新登录"
                     AuthStatusService.State.NETWORK_ERROR -> "暂时无法连接服务器，可以先检查连接"
                     else -> "无法确认登录状态，请检查连接"
                 }
-                _state.update { it.copy(isStarting = false, isLoggedIn = false, showLogin = true, loginError = message) }
+                _state.update {
+                    it.copy(
+                        isStarting = false,
+                        isLoggedIn = false,
+                        showLogin = true,
+                        loginError = message,
+                        isUploadPaused = true
+                    )
+                }
             }
         }
     }
@@ -245,6 +251,7 @@ internal class AppViewModel(
                 isStarting = false,
                 isLoggedIn = true,
                 isAuthenticating = false,
+                isUploadPaused = false,
                 showLogin = false,
                 loginPassword = "",
                 loginError = "",
@@ -252,11 +259,16 @@ internal class AppViewModel(
                 userId = AppConfig.getAuthUserId()
             )
         }
+        // 登录/重新登录后重新拉取服务器处理中的任务状态，避免进度一直停在旧状态
+        uploadCoordinator.currentTasks()
+            .filter { it.stage == TaskStage.PROCESSING }
+            .forEach { batchTracker.track(it.batchId) }
     }
 
     private fun logout() {
         batchTracker.setAuthenticated(false)
-        _state.update { it.copy(showAccountMenu = false) }
+        uploadCoordinator.suspendUploads()
+        _state.update { it.copy(showAccountMenu = false, isUploadPaused = true) }
         ioExecutor.submit {
             authGateway.logout()
             _state.update {
@@ -393,6 +405,18 @@ internal class AppViewModel(
         showMessage(message)
     }
 
+    private fun clearAllHistory() {
+        val count = uploadCoordinator.clearAllTasks()
+        _state.update {
+            it.copy(
+                isTaskSelectionMode = false,
+                selectedTaskIds = emptySet(),
+                showDeleteTaskConfirmation = false
+            )
+        }
+        showMessage(if (count > 0) "已清空全部 $count 条本地历史记录" else "本地历史记录为空")
+    }
+
     private fun ensureLoggedIn(): Boolean {
         if (_state.value.isLoggedIn && AppConfig.hasAuthToken()) return true
         requireLogin("请先登录后再继续")
@@ -401,8 +425,20 @@ internal class AppViewModel(
 
     private fun requireLogin(message: String) {
         batchTracker.setAuthenticated(false)
-        _state.update {
-            it.copy(isLoggedIn = false, showLogin = true, loginError = message, loginPassword = "")
+        _state.update { current ->
+            val alreadyWaiting = current.showLogin && !current.isLoggedIn
+            when {
+                // 已经在等待登录时保持现状，避免反复重置表单（会导致登录框闪烁、密码被清空）
+                alreadyWaiting && current.loginError == message && current.isUploadPaused -> current
+                alreadyWaiting -> current.copy(loginError = message, isUploadPaused = true)
+                else -> current.copy(
+                    isLoggedIn = false,
+                    showLogin = true,
+                    loginError = message,
+                    loginPassword = "",
+                    isUploadPaused = true
+                )
+            }
         }
     }
 

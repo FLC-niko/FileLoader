@@ -27,7 +27,6 @@ public class AppConfig {
     // 默认配置常量
     private static final String DEFAULT_SERVER_URL = "https://xssc.gdut.edu.cn";
     private static final String SCHOOL_SERVER_HOST = "xssc.gdut.edu.cn";
-    private static final String LEGACY_STUDIO_HOST = "10.21.76.73";
     private static final int DEFAULT_CONNECT_TIMEOUT = 30;
     private static final int DEFAULT_READ_TIMEOUT = 60;
     private static final int DEFAULT_WRITE_TIMEOUT = 60;

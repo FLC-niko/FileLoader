@@ -34,6 +34,7 @@ internal interface TaskRepository {
     fun load(): List<UploadTask>
     fun save(task: UploadTask)
     fun delete(batchIds: Set<String>)
+    fun clearAll()
 }
 
 internal interface SupportGateway {
@@ -68,16 +69,33 @@ internal class DefaultUploadGateway : UploadGateway {
 
 internal class DatabaseTaskRepository : TaskRepository {
     override fun load(): List<UploadTask> = BatchDatabase.getAll().map { record ->
+        val rawStage = runCatching { TaskStage.valueOf(record.stage) }.getOrDefault(TaskStage.PROCESSING)
+        // 兜底：程序重启后，历史如果遗留了 PREPARING 或 UPLOADING，内存中并未在执行，标记为 NEEDS_ATTENTION，避免假死或无法删除
+        val normalizedStage = when (rawStage) {
+            TaskStage.PREPARING, TaskStage.UPLOADING -> TaskStage.NEEDS_ATTENTION
+            else -> rawStage
+        }
+        val normalizedMessage = when {
+            rawStage == TaskStage.PREPARING || rawStage == TaskStage.UPLOADING -> "上次上传未完成（程序重启已中断）"
+            record.status.isNotBlank() -> record.status
+            normalizedStage == TaskStage.READY -> "处理完成，可以下载结果"
+            else -> "等待服务器返回处理进度"
+        }
+        val label = when {
+            record.sourceLabel.isNotBlank() -> record.sourceLabel
+            record.sourcePath.isNotBlank() -> File(record.sourcePath).name.ifBlank { "历史任务" }
+            else -> "历史任务"
+        }
         UploadTask(
             batchId = record.batchId,
-            sourceLabel = record.sourceLabel.ifBlank { "历史任务" },
+            sourceLabel = label,
             sourcePath = record.sourcePath,
             createdAt = record.createdAt,
-            stage = runCatching { TaskStage.valueOf(record.stage) }.getOrDefault(TaskStage.PROCESSING),
+            stage = normalizedStage,
             totalFiles = record.totalFiles,
             completedFiles = record.completedFiles,
             failedFiles = record.failedFiles,
-            message = record.status,
+            message = normalizedMessage,
             downloadable = record.stage == TaskStage.READY.name
         )
     }
@@ -97,6 +115,10 @@ internal class DatabaseTaskRepository : TaskRepository {
 
     override fun delete(batchIds: Set<String>) {
         BatchDatabase.deleteByIds(batchIds)
+    }
+
+    override fun clearAll() {
+        BatchDatabase.clearAll()
     }
 }
 

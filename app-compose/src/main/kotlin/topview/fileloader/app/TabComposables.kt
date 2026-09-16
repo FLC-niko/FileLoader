@@ -133,6 +133,7 @@ internal fun UploadTaskCard(
     expanded: Boolean,
     selectionMode: Boolean,
     selected: Boolean,
+    uploadPaused: Boolean,
     onAction: (AppAction) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
@@ -215,10 +216,22 @@ internal fun UploadTaskCard(
             if (task.stage == TaskStage.PREPARING || task.stage == TaskStage.UPLOADING || task.stage == TaskStage.PROCESSING) {
                 Spacer(Modifier.height(10.dp))
                 val progress = task.progress
-                if (progress == null) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                } else {
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                when {
+                    // 暂停时用确定进度条代替无限滚动动画，避免看起来“一直在跑”
+                    uploadPaused -> LinearProgressIndicator(
+                        progress = { progress ?: 0f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    progress == null -> LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    else -> LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                }
+                if (uploadPaused) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "已暂停，登录后自动继续",
+                        color = colors.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelLarge
+                    )
                 }
             }
 

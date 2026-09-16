@@ -233,6 +233,19 @@ public class BatchDatabase {
         }
     }
 
+    /**
+     * 清空本地数据库中的所有批次记录。
+     */
+    public static void clearAll() {
+        String sql = "DELETE FROM batch_records";
+        try (Connection conn = connect(); Statement stmt = conn.createStatement()) {
+            stmt.execute(sql);
+            logger.info("BatchDatabase 全部批次记录已清空");
+        } catch (SQLException e) {
+            logger.log(Level.WARNING, "BatchDatabase clearAll failed", e);
+        }
+    }
+
     // ---- 内部工具 ----
 
     private static Connection connect() throws SQLException {

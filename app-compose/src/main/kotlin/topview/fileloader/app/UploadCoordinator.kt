@@ -112,6 +112,11 @@ internal class UploadCoordinator(
         pausedForAuth.set(false)
     }
 
+    /** 退出登录时立即暂停上传，等重新登录后再自动继续。 */
+    fun suspendUploads() {
+        pausedForAuth.set(true)
+    }
+
     fun currentTasks(): List<UploadTask> = synchronized(lock) { tasks.values.toList() }
 
     data class DeleteSummary(val deleted: Int, val protected: Int)
@@ -139,21 +144,48 @@ internal class UploadCoordinator(
         return DeleteSummary(deletable.size, protected)
     }
 
+    fun clearAllTasks(): Int {
+        return synchronized(lock) {
+            val count = tasks.size
+            tasks.keys.toList().forEach { batchId ->
+                batchTracker.stopTracking(batchId)
+                archiveTempDirectories.remove(batchId)?.let(ArchiveExtractor::cleanupTempDir)
+            }
+            tasks.clear()
+            taskRepository.clearAll()
+            emitTasks()
+            count
+        }
+    }
+
     fun applyBatchStatus(batchId: String, status: topview.fileloader.service.BatchStatusService.BatchStatusResult) {
+        val isTerminalFailure = status.code == 404 || status.code == 410
+                || status.msg.contains("不存在") || status.msg.contains("已失效") || status.msg.contains("已过期")
+        if (isTerminalFailure) {
+            batchTracker.stopTracking(batchId)
+        }
         updateTask(batchId) { task ->
             val localFailure = task.files.any { it.stage == FileStage.FAILED }
             val stage = when {
+                isTerminalFailure -> TaskStage.NEEDS_ATTENTION
                 localFailure -> TaskStage.NEEDS_ATTENTION
                 task.files.any { it.stage == FileStage.UPLOADING || it.stage == FileStage.QUEUED } -> TaskStage.UPLOADING
                 status.isDownloadable -> TaskStage.READY
+                status.code != 200 && status.code != -1 -> TaskStage.NEEDS_ATTENTION
                 else -> TaskStage.PROCESSING
+            }
+            val displayMessage = when {
+                status.isDownloadable -> "处理完成，可以下载结果"
+                isTerminalFailure -> "批次在服务端已不存在或已失效"
+                status.code != 200 && status.code != -1 -> "查询异常：${status.msg}"
+                else -> userFacingStatus(status.msg, stage)
             }
             task.copy(
                 stage = stage,
                 processedFiles = status.processedFiles,
                 serverTotalFiles = status.totalFiles,
                 downloadable = status.isDownloadable,
-                message = userFacingStatus(status.msg, stage)
+                message = displayMessage
             )
         }
     }
@@ -384,8 +416,8 @@ internal class UploadCoordinator(
     }
 
     private fun pauseForAuth(message: String) {
-        pausedForAuth.set(true)
-        onAuthRequired(message)
+        // 只在暂停状态真正发生变化时通知 UI，避免多个等待线程反复弹出登录框导致界面闪烁
+        if (pausedForAuth.compareAndSet(false, true)) onAuthRequired(message)
     }
 
     override fun close() {

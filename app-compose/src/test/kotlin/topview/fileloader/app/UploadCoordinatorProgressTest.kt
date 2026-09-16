@@ -66,6 +66,7 @@ class UploadCoordinatorProgressTest {
                 override fun load() = emptyList<UploadTask>()
                 override fun save(task: UploadTask) = Unit
                 override fun delete(batchIds: Set<String>) = Unit
+                override fun clearAll() = Unit
             },
             onTasksChanged = { tasks ->
                 latestTasks.set(tasks)

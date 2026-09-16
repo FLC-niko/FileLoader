@@ -115,6 +115,7 @@ internal data class AppUiState(
     val isDragOver: Boolean = false,
     val isLoggedIn: Boolean = false,
     val isAuthenticating: Boolean = false,
+    val isUploadPaused: Boolean = false,
     val userName: String = "",
     val userId: String = "",
     val loginUserId: String = "",
@@ -174,6 +175,7 @@ internal sealed interface AppAction {
     data object RequestDeleteSelectedTasks : AppAction
     data object CancelDeleteSelectedTasks : AppAction
     data object ConfirmDeleteSelectedTasks : AppAction
+    data object ClearAllHistory : AppAction
     data class DownloadResult(val batchId: String) : AppAction
     data class DownloadWrongFiles(val batchId: String) : AppAction
     data class ToggleTaskDetails(val batchId: String) : AppAction

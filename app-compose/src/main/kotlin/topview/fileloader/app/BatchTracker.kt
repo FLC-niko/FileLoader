@@ -64,11 +64,14 @@ internal class BatchTracker(
         if (closed.get() || !authenticated.get()) return
         val result = gateway.status(batchId)
         if (result.code == 401) {
-            onAuthExpired("登录已过期，请重新登录")
+            // 停止轮询并只通知一次，避免每轮都重复弹出登录框
+            if (authenticated.compareAndSet(true, false)) onAuthExpired("登录已过期，请重新登录")
             return
         }
         onStatus(batchId, result)
-        if (result.isDownloadable) tracked.remove(batchId)
+        val isTerminal = result.isDownloadable || result.code == 404 || result.code == 410
+                || result.msg.contains("不存在") || result.msg.contains("已失效") || result.msg.contains("已过期")
+        if (isTerminal) tracked.remove(batchId)
     }
 
     override fun close() {

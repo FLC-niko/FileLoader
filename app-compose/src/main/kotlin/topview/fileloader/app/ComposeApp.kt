@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import topview.fileloader.config.LoggingConfig
 
 import java.awt.Desktop
+import java.awt.Frame
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
@@ -23,57 +24,100 @@ import java.awt.dnd.DropTargetAdapter
 import java.awt.dnd.DropTargetDropEvent
 import java.io.File
 import javax.swing.JFileChooser
+import javax.swing.JOptionPane
+import javax.swing.UIManager
 import javax.swing.filechooser.FileFilter
+import kotlin.system.exitProcess
 
 fun startComposeApp() {
     LoggingConfig.init()
-    application {
-        val viewModel = remember { AppViewModel() }
+    val instanceGuard = SingleInstanceGuard.acquire()
+    if (instanceGuard == null) {
+        notifyAlreadyRunning()
+        exitProcess(0)
+    }
+    try {
+        application {
+            val viewModel = remember { AppViewModel() }
 
-        Window(
-            title = "国基形式审查 · 文件上传助手",
-            state = WindowState(width = 1120.dp, height = 760.dp),
-            onCloseRequest = {
-                viewModel.close()
-                exitApplication()
-            }
-        ) {
-            DisposableEffect(Unit) {
-                DropTarget(window, object : DropTargetAdapter() {
-                    override fun dragEnter(event: java.awt.dnd.DropTargetDragEvent?) {
-                        event?.acceptDrag(DnDConstants.ACTION_COPY)
-                        viewModel.dispatch(AppAction.DragChanged(true))
-                    }
+            Window(
+                title = "国基形式审查 · 文件上传助手",
+                state = WindowState(width = 1120.dp, height = 760.dp),
+                onCloseRequest = {
+                    viewModel.close()
+                    exitApplication()
+                }
+            ) {
+                LaunchedEffect(instanceGuard) {
+                    instanceGuard.activationRequests.collect { bringWindowToFront(window) }
+                }
 
-                    override fun dragExit(event: java.awt.dnd.DropTargetEvent?) {
-                        viewModel.dispatch(AppAction.DragChanged(false))
-                    }
-
-                    override fun drop(event: DropTargetDropEvent?) {
-                        viewModel.dispatch(AppAction.DragChanged(false))
-                        event ?: return
-                        event.acceptDrop(DnDConstants.ACTION_COPY)
-                        try {
-                            val transferable = event.transferable
-                            if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
-                                val files = transferable.getTransferData(DataFlavor.javaFileListFlavor) as? List<*>
-                                viewModel.dispatch(AppAction.SourcesSelected(files.orEmpty().filterIsInstance<File>()))
-                            }
-                            event.dropComplete(true)
-                        } catch (_: Exception) {
-                            event.dropComplete(false)
+                DisposableEffect(Unit) {
+                    DropTarget(window, object : DropTargetAdapter() {
+                        override fun dragEnter(event: java.awt.dnd.DropTargetDragEvent?) {
+                            event?.acceptDrag(DnDConstants.ACTION_COPY)
+                            viewModel.dispatch(AppAction.DragChanged(true))
                         }
-                    }
-                })
-                onDispose { window.dropTarget = null }
-            }
 
-            DisposableEffect(Unit) {
-                onDispose { viewModel.close() }
-            }
+                        override fun dragExit(event: java.awt.dnd.DropTargetEvent?) {
+                            viewModel.dispatch(AppAction.DragChanged(false))
+                        }
 
-            FileLoaderRoot(viewModel)
+                        override fun drop(event: DropTargetDropEvent?) {
+                            viewModel.dispatch(AppAction.DragChanged(false))
+                            event ?: return
+                            event.acceptDrop(DnDConstants.ACTION_COPY)
+                            try {
+                                val transferable = event.transferable
+                                if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                                    val files = transferable.getTransferData(DataFlavor.javaFileListFlavor) as? List<*>
+                                    viewModel.dispatch(AppAction.SourcesSelected(files.orEmpty().filterIsInstance<File>()))
+                                }
+                                event.dropComplete(true)
+                            } catch (_: Exception) {
+                                event.dropComplete(false)
+                            }
+                        }
+                    })
+                    onDispose { window.dropTarget = null }
+                }
+
+                DisposableEffect(Unit) {
+                    onDispose { viewModel.close() }
+                }
+
+                FileLoaderRoot(viewModel)
+            }
         }
+    } finally {
+        instanceGuard.close()
+    }
+}
+
+/** 把已有窗口从最小化/后台恢复并置于最前，供第二个实例请求激活时使用。 */
+private fun bringWindowToFront(window: java.awt.Window) {
+    runCatching {
+        if (window is Frame) {
+            val state = window.extendedState
+            if (state and Frame.ICONIFIED != 0) {
+                window.extendedState = state and Frame.ICONIFIED.inv()
+            }
+        }
+        window.isVisible = true
+        window.toFront()
+        window.requestFocus()
+    }
+}
+
+/** 已有实例在运行时，提示用户并结束本次启动。 */
+private fun notifyAlreadyRunning() {
+    println("[FileLoader] 文件上传助手已经在运行，本次启动已取消。")
+    val message = "文件上传助手已经在运行了，请不要重复打开。\n已为你切到正在运行的窗口，如果没有看到请到后台窗口里查找。"
+    runCatching { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()) }
+    runCatching {
+        JOptionPane.showMessageDialog(null, message, "程序已在运行", JOptionPane.INFORMATION_MESSAGE)
+    }.onFailure {
+        // 无图形环境时只保留控制台提示
     }
 }
 

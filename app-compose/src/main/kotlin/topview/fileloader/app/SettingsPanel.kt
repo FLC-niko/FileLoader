@@ -97,6 +97,21 @@ internal fun SettingsDialog(state: AppUiState, onAction: (AppAction) -> Unit) {
 
                 HorizontalDivider(color = colors.outline.copy(alpha = 0.2f))
 
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("本地历史数据", style = MaterialTheme.typography.titleMedium)
+                        Text("清空本地数据库中的所有批次记录（不影响服务端数据）", color = colors.onSurfaceVariant)
+                    }
+                    OutlinedButton(
+                        onClick = { onAction(AppAction.ClearAllHistory) },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("清空记录")
+                    }
+                }
+
+                HorizontalDivider(color = colors.outline.copy(alpha = 0.2f))
+
                 TextButton(onClick = { onAction(AppAction.ToggleAdvancedSettings) }) {
                     Text("高级设置")
                     Spacer(Modifier.width(4.dp))

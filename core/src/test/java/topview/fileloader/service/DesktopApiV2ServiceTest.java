@@ -96,10 +96,10 @@ class DesktopApiV2ServiceTest {
     }
 
     @Test
-    void legacyStudioAndInsecureSchoolUrlsNormalizeToSchoolHttps() {
+    void studioUrlPreservedAndInsecureSchoolUrlsNormalizeToSchoolHttps() {
         AppConfig.setAuthSession("studio-token", "00005625", "测试用户", 1, "now");
         AppConfig.setServerUrl("http://10.21.76.73:8081/");
-        assertEquals("https://xssc.gdut.edu.cn", AppConfig.getServerUrl());
+        assertEquals("http://10.21.76.73:8081/", AppConfig.getServerUrl());
         assertFalse(AppConfig.hasAuthToken(), "switching servers must discard the previous environment token");
 
         AppConfig.setServerUrl("http://xssc.gdut.edu.cn");

@@ -272,6 +272,9 @@ private fun TaskArea(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text("上传任务", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                if (state.isUploadPaused && !state.isTaskSelectionMode) {
+                    Text("已暂停", color = colors.onSurfaceVariant)
+                }
                 if (state.isTaskSelectionMode) {
                     Text("已选 ${state.selectedTaskIds.size} 项", color = colors.onSurfaceVariant)
                     TextButton(onClick = { onAction(AppAction.ToggleAllTaskSelection) }) {
@@ -314,6 +317,7 @@ private fun TaskArea(
                             expanded = task.batchId in state.expandedTaskIds,
                             selectionMode = state.isTaskSelectionMode,
                             selected = task.batchId in state.selectedTaskIds,
+                            uploadPaused = state.isUploadPaused,
                             onAction = onAction
                         )
                     }

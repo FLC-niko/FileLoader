@@ -17,6 +17,7 @@ class UploadCoordinatorDeleteTest {
             override fun load() = listOf(ready, uploading)
             override fun save(task: UploadTask) = Unit
             override fun delete(batchIds: Set<String>) { deleted += batchIds }
+            override fun clearAll() = Unit
         }
         val batchGateway = object : BatchGateway {
             override fun createBatch() = BatchIdService.BatchIdResult(200, "ok", "new")

@@ -60,5 +60,11 @@ class BatchDatabaseMigrationTest {
 
         BatchDatabase.deleteByIds(java.util.Set.of("legacy-batch"));
         assertTrue(BatchDatabase.getAll().isEmpty());
+
+        BatchDatabase.upsert("batch-1", "状态1");
+        BatchDatabase.upsert("batch-2", "状态2");
+        assertEquals(2, BatchDatabase.getAll().size());
+        BatchDatabase.clearAll();
+        assertTrue(BatchDatabase.getAll().isEmpty());
     }
 }
