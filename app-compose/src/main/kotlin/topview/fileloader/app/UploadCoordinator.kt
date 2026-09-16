@@ -321,7 +321,7 @@ internal class UploadCoordinator(
         }
         val response = try {
             uploadGateway.upload(file, work.batchId) { progress ->
-                updateFile(work.batchId, work.filePath) { it.copy(progress = progress.coerceIn(0, 100)) }
+                updateFileProgress(work.batchId, work.filePath, progress.coerceIn(0, 100))
             }
         } catch (e: Exception) {
             markFailed(work, "网络连接中断，请稍后重试", retryable = true)
@@ -345,6 +345,18 @@ internal class UploadCoordinator(
                 friendlyNetworkMessage(response.message, "上传失败，请重试"),
                 retryable = response.code >= 500 || response.message.contains("网络") || response.message.contains("超时")
             )
+        }
+    }
+
+    private fun updateFileProgress(batchId: String, filePath: String, progress: Int) {
+        synchronized(lock) {
+            val task = tasks[batchId] ?: return
+            val currentFile = task.files.firstOrNull { it.path == filePath } ?: return
+            if (currentFile.progress == progress) return
+            val files = task.files.map { if (it.path == filePath) it.copy(progress = progress) else it }
+            val updated = task.copy(files = files)
+            tasks[batchId] = updated
+            emitTasks()
         }
     }
 

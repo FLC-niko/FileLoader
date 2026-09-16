@@ -66,7 +66,7 @@ public final class SourceMonitor implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         });
-        int readinessThreads = Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors()));
+        int readinessThreads = Math.max(4, Math.min(32, Runtime.getRuntime().availableProcessors() * 4));
         this.readinessExecutor = Executors.newFixedThreadPool(readinessThreads, r -> {
             Thread thread = new Thread(r, "source-monitor-readiness");
             thread.setDaemon(true);
@@ -96,7 +96,7 @@ public final class SourceMonitor implements AutoCloseable {
                 stream.filter(Files::isRegularFile).map(SourceMonitor::normalize).forEach(existing::add);
             }
             listener.onSourceStarted(folder, existing.size());
-            existing.forEach(file -> discover(file, folder));
+            existing.forEach(file -> discover(file, folder, true));
             return true;
         } catch (Exception e) {
             WatchKey registered = keysByFolder.remove(folder);
@@ -170,6 +170,10 @@ public final class SourceMonitor implements AutoCloseable {
     }
 
     private void discover(Path file, Path folder) {
+        discover(file, folder, false);
+    }
+
+    private void discover(Path file, Path folder, boolean isInitialScan) {
         String name = file.getFileName() == null ? "" : file.getFileName().toString();
         if (name.startsWith("~$") || ArchiveExtractor.isArchiveFile(name)) {
             return;
@@ -179,6 +183,21 @@ public final class SourceMonitor implements AutoCloseable {
         }
         if (!knownFiles.add(file) || !checkingFiles.add(file)) {
             return;
+        }
+        if (isInitialScan) {
+            try {
+                if (Files.isRegularFile(file) && Files.isReadable(file)) {
+                    long size = Files.size(file);
+                    long lastModified = Files.getLastModifiedTime(file).toMillis();
+                    // 文件夹初始扫描的既有文件：若非空且最近 1 秒内无写入修改，说明是已经写毕的稳定文件，立即就绪
+                    if (size > 0 && (System.currentTimeMillis() - lastModified) > 1000) {
+                        checkingFiles.remove(file);
+                        listener.onFileReady(file, folder);
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {
+            }
         }
         readinessExecutor.submit(() -> waitUntilReady(file, folder));
     }
@@ -190,17 +209,26 @@ public final class SourceMonitor implements AutoCloseable {
             for (int attempt = 0; attempt < 20 && !closed.get(); attempt++) {
                 if (!Files.exists(file)) {
                     if (attempt < 5) {
-                        Thread.sleep(500);
+                        Thread.sleep(300);
                         continue;
                     }
                     knownFiles.remove(file);
                     return;
                 }
                 if (!Files.isRegularFile(file) || !Files.isReadable(file)) {
-                    Thread.sleep(500);
+                    Thread.sleep(300);
                     continue;
                 }
                 long size = Files.size(file);
+                long lastModified = 0;
+                try {
+                    lastModified = Files.getLastModifiedTime(file).toMillis();
+                } catch (Exception ignored) {
+                }
+                if (size > 0 && lastModified > 0 && (System.currentTimeMillis() - lastModified) > 1500) {
+                    listener.onFileReady(file, folder);
+                    return;
+                }
                 if (size > 0 && size == previousSize) {
                     stableCount++;
                     if (stableCount >= 2) {
@@ -211,7 +239,7 @@ public final class SourceMonitor implements AutoCloseable {
                     previousSize = size;
                     stableCount = 0;
                 }
-                Thread.sleep(700);
+                Thread.sleep(400);
             }
             listener.onSourceError(folder, "文件尚未写入完成：" + file.getFileName());
         } catch (InterruptedException e) {
